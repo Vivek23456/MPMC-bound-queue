@@ -69,7 +69,7 @@ sequenceDiagram
 ### Why Mutex + Condvar?
 
 - **Correctness first**: A single mutex serializing all buffer access is the simplest model to reason about for a bounded MPMC queue. No ABA problems, no memory ordering subtleties, no torn reads.
-- **Blocking semantics are natural**: The assignment requires `push` to block when full and `pop` to block when empty. Condvars map directly to this — `wait` releases the lock and sleeps atomically, avoiding lost wakeups.
+- **Blocking semantics are natural**: This requires `push` to block when full and `pop` to block when empty. Condvars map directly to this — `wait` releases the lock and sleeps atomically, avoiding lost wakeups.
 - **`std`-only constraint**: Lock-free MPMC queues typically rely on `crossbeam-epoch` or similar for safe memory reclamation. Building that from scratch in `std` is a significant correctness risk for the scope of this assignment.
 
 ### Tradeoffs vs lock-free
