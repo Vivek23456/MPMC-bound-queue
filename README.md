@@ -64,6 +64,37 @@ sequenceDiagram
     C->>M: unlock
 ```
 
+## Design rationale
+
+### Why Mutex + Condvar?
+
+- **Correctness first**: A single mutex serializing all buffer access is the simplest model to reason about for a bounded MPMC queue. No ABA problems, no memory ordering subtleties, no torn reads.
+- **Blocking semantics are natural**: The assignment requires `push` to block when full and `pop` to block when empty. Condvars map directly to this — `wait` releases the lock and sleeps atomically, avoiding lost wakeups.
+- **`std`-only constraint**: Lock-free MPMC queues typically rely on `crossbeam-epoch` or similar for safe memory reclamation. Building that from scratch in `std` is a significant correctness risk for the scope of this assignment.
+
+### Tradeoffs vs lock-free
+
+| Property | Mutex + Condvar | Lock-free ring |
+|---|---|---|
+| Latency (uncontended) | ~50-100ns (syscall if contended) | ~10-30ns (CAS loop) |
+| Latency (contended) | Degrades to OS scheduler granularity | Degrades to CAS retry storms |
+| Throughput scaling | Drops with thread count (single lock) | Better up to core count, then plateau |
+| Correctness risk | Low (well-understood pattern) | High (ABA, memory ordering, reclamation) |
+| Fairness | OS scheduler decides (reasonably fair) | No guarantee (CAS starvation possible) |
+
+### When this design breaks
+
+- **High thread counts on a hot path**: With 16+ threads contending on one mutex, throughput degrades significantly (benchmarks show ~536K ops/s at 16 pairs vs ~1.2M at 1 pair with cap=64). The mutex becomes the serialization bottleneck.
+- **Latency-sensitive microsecond paths**: Mutex acquisition involves a syscall when contended (`futex` on Linux). For sub-microsecond requirements, a lock-free design or sharded queues would be necessary.
+- **Asymmetric workloads**: The 8P/1C benchmark shows throughput bottlenecked by the single consumer (~500K ops/s regardless of capacity), because all 8 producers contend for the same lock the consumer holds.
+
+### What I would change for production low-latency
+
+1. **Lock-free bounded ring** (Vyukov-style): per-slot sequence counters, `AtomicUsize` head/tail with CAS, no mutex. Eliminates syscall overhead entirely.
+2. **Cache-line padding**: Separate head and tail into different cache lines to avoid false sharing between producers and consumers.
+3. **Batch operations**: Amortize synchronization cost by pushing/popping multiple items per lock acquisition (or per CAS round).
+4. **Sharding**: Multiple queues behind a distributor to reduce contention at high thread counts.
+
 ## Trait
 
 ```rust
