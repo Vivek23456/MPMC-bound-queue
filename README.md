@@ -1,4 +1,4 @@
- # Bounded MPMC Queue
+# Bounded MPMC Queue
 
 A bounded, multi-producer multi-consumer (MPMC) queue implemented in Rust using only `std`.
 
@@ -19,8 +19,8 @@ flowchart LR
   end
   subgraph queue [MutexRingQueue]
     M[Mutex]
-    NF["not_full (Condvar)"]
-    NE["not_empty (Condvar)"]
+    NF["not_full Condvar"]
+    NE["not_empty Condvar"]
     RB[RingBuffer]
   end
   subgraph consumers [Consumers]
@@ -35,11 +35,11 @@ flowchart LR
   M --> NE
   C1 --> M
   C2 --> M
+```
 
+### Push / Pop flow
 
-# Push / Pop flow
-
-
+```mermaid
 sequenceDiagram
     participant P as Producer
     participant M as Mutex
@@ -48,24 +48,25 @@ sequenceDiagram
     participant C as Consumer
     P->>M: lock
     alt queue full
-        M->>NF: wait (release lock, sleep)
-        NF-->>P: wake (re-acquire lock)
+        M->>NF: wait
+        NF-->>P: wake
     end
     P->>M: write slot, len++
     P->>NE: notify_one
     P->>M: unlock
     C->>M: lock
     alt queue empty
-        M->>NE: wait (release lock, sleep)
-        NE-->>C: wake (re-acquire lock)
+        M->>NE: wait
+        NE-->>C: wake
     end
-    C->>M: read slot, advance head, len--
+    C->>M: read slot, len--
     C->>NF: notify_one
     C->>M: unlock
+```
 
+## Trait
 
- # Trait
-
+```rust
 pub trait BoundedQueue<T: Send>: Send + Sync {
     fn new(capacity: usize) -> Self where Self: Sized;
     fn push(&self, item: T);          // blocks if full
@@ -73,9 +74,11 @@ pub trait BoundedQueue<T: Send>: Send + Sync {
     fn try_push(&self, item: T) -> Result<(), T>; // Err(item) if full
     fn try_pop(&self) -> Option<T>;   // None if empty
 }
+```
 
-# Project structure
+## Project structure
 
+```
 ├── Cargo.toml                 # Library crate; criterion as dev-dependency only
 ├── src/
 │   ├── lib.rs                 # BoundedQueue trait + re-exports
@@ -85,73 +88,52 @@ pub trait BoundedQueue<T: Send>: Send + Sync {
 ├── benches/
 │   └── throughput.rs          # Criterion benchmarks (symmetric + asymmetric workloads)
 └── BENCH_RESULTS.md           # Recorded throughput numbers
+```
 
+## Constraints
 
- # Constraints
+- **Queue implementation**: `std` only — no external crate dependencies.
+- **`unsafe`**: Used for `MaybeUninit::assume_init_read()` and `assume_init_drop()` in pop/drop paths. Each block has a justification comment documenting the invariant.
+- **Benchmarks/tests**: Use `criterion` as a dev-dependency (not part of the queue).
 
-Queue implementation: std only — no external crate dependencies.
-unsafe: Used for MaybeUninit::assume_init_read() and assume_init_drop() in pop/drop paths. Each block has a justification comment documenting the invariant.
-Benchmarks/tests: Use criterion as a dev-dependency (not part of the queue).
+## Running
 
-
-
-
+```bash
 # Run all 19 tests
 cargo test
 
 # Run benchmarks (throughput across thread counts, capacities, asymmetric workload)
 cargo bench --bench throughput
+```
 
+## Tests (19 total)
 
+| Test | What it proves |
+|---|---|
+| `single_thread_try_semantics` | `try_push`/`try_pop` on full/empty queue |
+| `fifo_spot_check_single_producer_single_consumer` | FIFO ordering (10K items) |
+| `contention_balance_many_producers_many_consumers` | 8P/8C, no lost/duplicate items (200K total) |
+| `capacity_one_single_thread` | Smallest buffer edge case |
+| `capacity_one_two_threads` | FIFO with cap=1 under concurrency |
+| `fill_drain_single_thread` | Full fill then full drain |
+| `multiple_fill_drain_cycles` | Ring head/tail wrapping over 10 cycles |
+| `push_blocks_when_full` | `push` blocks; unblocks after `pop` |
+| `pop_blocks_when_empty` | `pop` blocks; unblocks after `push` |
+| `drop_correctness_items_dropped_on_queue_drop` | Remaining items dropped exactly once |
+| `drop_correctness_full_pop` | All-popped items dropped, none leaked |
+| `try_push_returns_original_item` | Failed `try_push` returns the exact item |
+| `mixed_blocking_and_nonblocking` | `push`/`pop` + `try_push`/`try_pop` interleaved |
+| `stress_many_producers_few_consumers` | 16P/2C, sum-based correctness |
+| `stress_few_producers_many_consumers` | 2P/16C, count-based correctness |
+| `stress_varying_capacities` | Same workload across caps 1, 2, 7, 64, 256, 1024 |
+| `large_volume_spsc` | 1M items, sum correctness |
+| `zero_sized_type` | Works with `()` (ZST) |
+| `concurrent_try_operations_no_deadlock` | 4 try-producers + 4 try-consumers, no deadlock |
 
-Tests (19 total)
-Test	What it proves
-single_thread_try_semantics
-try_push/try_pop on full/empty queue
-fifo_spot_check_single_producer_single_consumer
-FIFO ordering (10K items)
-contention_balance_many_producers_many_consumers
-8P/8C, no lost/duplicate items (200K total)
-capacity_one_single_thread
-Smallest buffer edge case
-capacity_one_two_threads
-FIFO with cap=1 under concurrency
-fill_drain_single_thread
-Full fill then full drain
-multiple_fill_drain_cycles
-Ring head/tail wrapping over 10 cycles
-push_blocks_when_full
-push blocks; unblocks after pop
-pop_blocks_when_empty
-pop blocks; unblocks after push
-drop_correctness_items_dropped_on_queue_drop
-Remaining items dropped exactly once
-drop_correctness_full_pop
-All-popped items dropped, none leaked
-try_push_returns_original_item
-Failed try_push returns the exact item
-mixed_blocking_and_nonblocking
-push/pop + try_push/try_pop interleaved
-stress_many_producers_few_consumers
-16P/2C, sum-based correctness
-stress_few_producers_many_consumers
-2P/16C, count-based correctness
-stress_varying_capacities
-Same workload across caps 1, 2, 7, 64, 256, 1024
-large_volume_spsc
-1M items, sum correctness
-zero_sized_type
-Works with () (ZST)
-concurrent_try_operations_no_deadlock
-4 try-producers + 4 try-consumers, no deadlock
-Benchmark dimensions
-Symmetric pairs: 1, 2, 4, 8, 16 producer/consumer pairs
-Capacities: 64, 256, 1024
-Asymmetric: 8 producers / 1 consumer
+## Benchmark dimensions
 
-See BENCH_RESULTS.md for recorded throughput numbers.
+- **Symmetric pairs**: 1, 2, 4, 8, 16 producer/consumer pairs
+- **Capacities**: 64, 256, 1024
+- **Asymmetric**: 8 producers / 1 consumer
 
-
----
-
-To add this as `README.md` in your repo, switch to **Agent mode** and ask me to create it.
+See [BENCH_RESULTS.md](BENCH_RESULTS.md) for recorded throughput numbers.
