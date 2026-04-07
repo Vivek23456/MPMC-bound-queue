@@ -36,7 +36,6 @@ flowchart LR
   C1 --> M
   C2 --> M
 
- # Push / Pop flow
 sequenceDiagram
     participant P as Producer
     participant M as Mutex
