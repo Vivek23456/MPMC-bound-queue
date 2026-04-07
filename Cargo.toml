@@ -1,0 +1,17 @@
+[package]
+name = "bounded_mpmc_queue"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "bounded_mpmc_queue"
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "throughput"
+harness = false
